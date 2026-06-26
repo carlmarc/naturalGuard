@@ -327,3 +327,162 @@ class TestSourceidVal:
         seen = {e["source_class"] for e in self.manifest["entries"]}
         missing = expected - seen
         assert not missing, f"Sources absent from val: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# TESTS: processing_state/train/mixed.json
+# ---------------------------------------------------------------------------
+
+
+MIXED_MANIFEST_PATH = DATASET_ROOT / "processing_state" / "train" / "mixed.json"
+MIXED_EXPECTED_COMBOS = [
+    f"{vd}_over_{src}"
+    for vd in ["librispeech_devclean", "nus_48e_sing"]
+    for src in ["suno", "boomy", "mubert", "mureka", "musicgen", "stable_audio", "elevenlabsmusic"]
+]
+MIXED_REQUIRED_MIX_PARAMS = [
+    "vocal_gain_db", "vocal_shelf_db", "deess_db",
+    "reverb_preset", "reverb_wet_db",
+    "compression_target_db", "compression_threshold_db",
+]
+
+
+def _load_mixed_manifest() -> list[dict]:
+    if not MIXED_MANIFEST_PATH.exists():
+        pytest.skip(f"Mixed manifest not found: {MIXED_MANIFEST_PATH}. Run build_mixed_examples.py first.")
+    with open(MIXED_MANIFEST_PATH) as f:
+        return json.load(f)
+
+
+class TestMixedManifest:
+    """Checks for processing_state/train/mixed.json."""
+
+    def setup_method(self):
+        self.records = _load_mixed_manifest()
+        self.ok = [r for r in self.records if r.get("status") == "ok"]
+
+    def test_manifest_loads(self):
+        """Manifest must be a non-empty JSON list."""
+        assert isinstance(self.records, list), "Manifest must be a list"
+        assert len(self.records) > 0, "Manifest must be non-empty"
+
+    def test_ok_count(self):
+        """Must have at least 1400 ok records (1500 target, allowing some failures)."""
+        assert len(self.ok) >= 1400, f"Expected >= 1400 ok records, got {len(self.ok)}"
+
+    def test_all_ok(self):
+        """In a clean run there should be zero failures."""
+        failed = [r for r in self.records if r.get("status") != "ok"]
+        assert not failed, f"{len(failed)} failed records: {[r.get('song_id') for r in failed[:3]]}"
+
+    def test_record_has_required_fields(self):
+        """Spot-check 50 records for mandatory fields."""
+        required = [
+            "song_id", "status", "idx", "combo",
+            "vocal_dataset", "vocal_speaker",
+            "instrumental_source", "instrumental_song_id",
+            "processed_path", "labels", "mix_params",
+        ]
+        step = max(1, len(self.ok) // 50)
+        for rec in self.ok[::step]:
+            for field in required:
+                assert field in rec, f"Record {rec.get('song_id')} missing field '{field}'"
+
+    def test_mix_params_keys(self):
+        """mix_params must contain all expected keys."""
+        step = max(1, len(self.ok) // 50)
+        for rec in self.ok[::step]:
+            params = rec.get("mix_params", {})
+            for key in MIXED_REQUIRED_MIX_PARAMS:
+                assert key in params, f"mix_params missing '{key}' in {rec['song_id']}"
+
+    def test_labels_are_two_hot(self):
+        """Each mixed record must have exactly human=1 and one AI class=1."""
+        bad = []
+        for rec in self.ok:
+            labels = rec.get("labels", {})
+            if labels.get("human") != 1:
+                bad.append((rec["song_id"], "human != 1"))
+                continue
+            ai_positives = [cls for cls in SOURCEID_CLASSES if cls != "human" and labels.get(cls) == 1]
+            if len(ai_positives) != 1:
+                bad.append((rec["song_id"], f"ai_positives={ai_positives}"))
+        assert not bad, f"Labels wrong in {len(bad)} records: {bad[:3]}"
+
+    def test_ai_label_matches_instrumental_source(self):
+        """The AI class that is 1 must match instrumental_source."""
+        bad = []
+        for rec in self.ok:
+            src = rec.get("instrumental_source")
+            labels = rec.get("labels", {})
+            if labels.get(src) != 1:
+                bad.append((rec["song_id"], src, labels.get(src)))
+        assert not bad, f"instrumental_source/label mismatch: {bad[:3]}"
+
+    def test_all_combos_present(self):
+        """All 14 (vocal_dataset, ai_source) combos must appear at least once."""
+        seen_combos = {r["combo"] for r in self.ok}
+        missing = set(MIXED_EXPECTED_COMBOS) - seen_combos
+        assert not missing, f"Missing combos: {missing}"
+
+    def test_output_files_exist(self):
+        """Spot-check 20 processed_path files actually exist on disk."""
+        step = max(1, len(self.ok) // 20)
+        missing = []
+        for rec in self.ok[::step]:
+            p = DATASET_ROOT / rec["processed_path"]
+            if not p.exists():
+                missing.append(rec["processed_path"])
+        assert not missing, f"Missing output files: {missing[:5]}"
+
+    def test_output_duration_is_seven_seconds(self):
+        """Spot-check 5 files: ffprobe duration must be between 6.9 and 7.2 seconds.
+
+        The slight overshoot (7.053 s typical) comes from MP3's frame-boundary
+        encoding — the decoder emits full frames, so the last frame may extend
+        slightly past the 7.0 s content.
+        """
+        import subprocess
+        step = max(1, len(self.ok) // 5)
+        bad = []
+        for rec in self.ok[::step]:
+            p = DATASET_ROOT / rec["processed_path"]
+            if not p.exists():
+                continue
+            result = subprocess.run(
+                ["ffprobe", "-v", "quiet", "-print_format", "json",
+                 "-show_streams", str(p)],
+                capture_output=True,
+            )
+            if result.returncode != 0:
+                bad.append((rec["processed_path"], "ffprobe failed"))
+                continue
+            info = json.loads(result.stdout)
+            duration = float(info["streams"][0].get("duration", 0))
+            if not (6.9 <= duration <= 7.2):
+                bad.append((rec["processed_path"], f"duration={duration:.3f}s"))
+        assert not bad, f"Unexpected durations: {bad}"
+
+    def test_no_duplicate_song_ids(self):
+        """song_ids must be unique in the manifest."""
+        ids = [r["song_id"] for r in self.ok]
+        assert len(ids) == len(set(ids)), "Duplicate song_ids in mixed manifest"
+
+    def test_reverb_preset_values_valid(self):
+        """reverb_preset must be one of tight / loose / none."""
+        valid = {"tight", "loose", "none"}
+        bad = [
+            r["song_id"]
+            for r in self.ok
+            if r["mix_params"].get("reverb_preset") not in valid
+        ]
+        assert not bad, f"Invalid reverb_preset in: {bad[:5]}"
+
+    def test_vocal_gain_in_range(self):
+        """vocal_gain_db must be within ±6 dB."""
+        bad = [
+            (r["song_id"], r["mix_params"]["vocal_gain_db"])
+            for r in self.ok
+            if not (-6.0 <= r["mix_params"]["vocal_gain_db"] <= 6.0)
+        ]
+        assert not bad, f"vocal_gain_db out of range: {bad[:5]}"
