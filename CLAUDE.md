@@ -412,6 +412,24 @@ For complex code, the docstring includes:
 - What it removes from the signal, what it preserves
 - Why it fits the project's goal
 
+### Inline comments for readability
+
+In addition to docstrings, use inline comments to help a first-time
+reader follow the logic:
+
+- Section markers between logical blocks (e.g. `# ---- Compute splits ----`)
+- One-line comments on non-obvious code
+- Domain context where it helps (audio math, PyTorch tensor shapes)
+- Magic numbers labeled with origin or meaning
+
+Don't:
+- Add comments that just restate the code
+- Write paragraphs inline (paragraphs belong in docstrings)
+- Comment every line; comment what isn't obvious from the code itself
+
+Goal: someone reading the file for the first time can follow the flow
+without running it mentally. Clarity over coverage.
+
 ### Type hints
 
 PEP 604 (int | None, not Optional[int]). Dataclasses where Hydra isn't enough.

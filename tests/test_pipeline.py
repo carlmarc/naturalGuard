@@ -225,16 +225,15 @@ class TestSourceidTrain:
         missing = expected - seen
         assert not missing, f"Sources absent from train: {missing}"
 
-    def test_each_entry_has_exactly_one_positive_label(self):
-        """Pure-source entries must have exactly one positive label."""
+    def test_label_positive_counts_by_source_class(self):
+        """Pure-source entries have exactly 1 positive; mixed entries have exactly 2."""
         bad = []
         for e in self.manifest["entries"]:
             n_pos = sum(v for v in e["labels"].values())
-            if n_pos != 1:
-                bad.append((e["song_id"], n_pos))
-        # Allow a small number to be mixed examples once build_mixed_examples runs.
-        # For now (pure sources only), all must have exactly 1 positive.
-        assert not bad, f"Entries with != 1 positive label: {bad[:5]}"
+            expected = 2 if e["source_class"] == "mixed" else 1
+            if n_pos != expected:
+                bad.append((e["song_id"], e["source_class"], f"n_pos={n_pos} expected={expected}"))
+        assert not bad, f"Wrong positive-label count: {bad[:5]}"
 
     def test_natural_entries_have_human_label(self):
         """natural source_class must have human=1."""
@@ -246,12 +245,13 @@ class TestSourceidTrain:
         assert not bad, f"Natural entries without human=1: {bad[:5]}"
 
     def test_ai_entries_have_correct_label(self):
-        """Each AI source must have its own class=1 and human=0."""
+        """Each pure-AI source must have its own class=1 and human=0.
+        Mixed entries (source_class='mixed') are two-hot and checked separately."""
         bad = []
         for e in self.manifest["entries"]:
             src = e["source_class"]
-            if src == "natural":
-                continue
+            if src in ("natural", "mixed"):
+                continue  # handled by their own tests
             if src not in e["labels"]:
                 bad.append((e["song_id"], src, "class not in labels"))
             elif e["labels"][src] != 1:
@@ -259,6 +259,21 @@ class TestSourceidTrain:
             elif e["labels"]["human"] != 0:
                 bad.append((e["song_id"], src, f"human label={e['labels']['human']} (should be 0)"))
         assert not bad, f"AI entries with wrong labels: {bad[:5]}"
+
+    def test_mixed_entries_have_two_hot_labels(self):
+        """Mixed entries must have human=1 and exactly one AI class=1."""
+        bad = []
+        for e in self.manifest["entries"]:
+            if e["source_class"] != "mixed":
+                continue
+            labels = e["labels"]
+            if labels.get("human") != 1:
+                bad.append((e["song_id"], "human != 1"))
+                continue
+            ai_pos = [c for c in SOURCEID_CLASSES if c != "human" and labels.get(c) == 1]
+            if len(ai_pos) != 1:
+                bad.append((e["song_id"], f"ai_positives={ai_pos}"))
+        assert not bad, f"Mixed entries with wrong labels: {bad[:5]}"
 
     def test_no_excluded_sources(self):
         """melodia, ldm2, melodia_test must not appear in train."""
