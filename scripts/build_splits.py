@@ -16,7 +16,8 @@ Three manifests are produced:
                                  (NT-Xent is self-supervised, not binary).
 
   sourceid_train.json         — Phase 2 train set (90% per source).
-                                 Includes natural + all SourceID AI sources.
+                                 Includes natural + all SourceID AI sources
+                                 + mixed examples from mixed.json.
                                  Includes top-level pos_weight per class.
 
   sourceid_val.json           — Phase 2 val set (10% per source).
@@ -219,6 +220,49 @@ def _load_source_records(source: str, dataset_root: Path) -> list[dict[str, Any]
     return results
 
 
+def _load_mixed_records(dataset_root: Path) -> list[dict[str, Any]]:
+    """Load mixed example records from processing_state/train/mixed.json.
+
+    Mixed examples are [human=1, ai_class=1] synthetic files built by
+    build_mixed_examples.py. They arrive here already in manifest-entry
+    format — labels are pre-computed two-hot vectors, processed_path is
+    dataset-root-relative, and duration is fixed at 7 s (one window).
+
+    Returns [] if mixed.json doesn't exist yet (script is re-entrant).
+
+    Bucket values for mixed entries:
+      vocal_class       = "voiced"  — every mixed example has a human vocal
+      duration_bucket   = "<30s"    — 7 s window is always the shortest bucket
+      high_energy_bucket = "mid"    — not analyzed per-file; default used here
+                                      because mixed examples are excluded from
+                                      the stratification cap that protects
+                                      against the high-band energy confound
+    """
+    mixed_path = dataset_root / "processing_state" / "train" / "mixed.json"
+    if not mixed_path.exists():
+        return []
+
+    with open(mixed_path) as f:
+        raw_records: list[dict] = json.load(f)
+
+    results: list[dict[str, Any]] = []
+    for rec in raw_records:
+        if rec.get("status") != "ok":
+            continue
+        results.append({
+            "song_id":            rec["song_id"],
+            "source_class":       "mixed",
+            "processed_path":     rec["processed_path"],
+            "duration_sec":       7.0,   # fixed — every mixed example is one 7-second window
+            "labels":             rec["labels"],
+            "vocal_class":        "voiced",
+            "duration_bucket":    "<30s",
+            "high_energy_bucket": "mid",
+        })
+
+    return results
+
+
 # ---------------------------------------------------------------------------
 # STRATIFIED CAP
 # ---------------------------------------------------------------------------
@@ -246,30 +290,40 @@ def _cap_stratified(
     if len(records) <= cap:
         return records
 
-    # Group by stratum key.
+    # ---- Group into strata ----
+
+    # Stratum key: (vocal_class, high_energy_bucket) — the two confound axes
+    # that stratification_buckets() in metadata.py exposes.
     buckets: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for r in records:
         key = (r["vocal_class"], r["high_energy_bucket"])
         buckets[key].append(r)
 
-    total = len(records)
+    total = len(records)  # denominator for fractional shares
 
-    # Proportional allocation with Largest-Remainder rounding so the
-    # allocations sum to exactly `cap`.
+    # ---- Largest-Remainder allocation ----
+    # Each stratum's ideal share: cap × (stratum_size / total).
+    # Floor-division leaves `remainder` slots unassigned; award them one-by-one
+    # to the strata with the largest fractional parts.  This is the standard
+    # Hamilton/Largest-Remainder method — guarantees sum(allocs) == cap exactly.
+
     raw_allocs = {k: cap * len(v) / total for k, v in buckets.items()}
-    floor_allocs = {k: int(v) for k, v in raw_allocs.items()}
-    remainder = cap - sum(floor_allocs.values())
+    floor_allocs = {k: int(v) for k, v in raw_allocs.items()}  # step 1: floor each share
+    remainder = cap - sum(floor_allocs.values())                # slots left after flooring
+    # Rank strata by descending fractional part (raw - floor); highest gets first extra slot.
     sorted_keys = sorted(
         buckets.keys(), key=lambda k: -(raw_allocs[k] - floor_allocs[k])
     )
     allocs = dict(floor_allocs)
-    for k in sorted_keys[:remainder]:
+    for k in sorted_keys[:remainder]:   # award one extra slot per stratum, largest-remainder first
         allocs[k] += 1
+
+    # ---- Sample within each stratum ----
 
     selected: list[dict[str, Any]] = []
     for k, v in buckets.items():
         shuffled = list(v)
-        rng.shuffle(shuffled)
+        rng.shuffle(shuffled)           # random subset, not first-N (which could be ordered by batch)
         selected.extend(shuffled[: allocs[k]])
 
     return selected
@@ -309,6 +363,11 @@ def _train_val_split(
     for v in buckets.values():
         shuffled = list(v)
         rng.shuffle(shuffled)
+        # Single-track stratum: can't split without leaving train empty.
+        # Send it entirely to train; val gets nothing for this cell.
+        # round() rather than int() so a 10-track stratum yields 1 val track
+        # (int(10 * 0.10) = 1 too, but round(3 * 0.10) = 0 whereas we want 0
+        # there — max(1, ...) only kicks in when n > 1).
         n_val = max(1, round(len(shuffled) * val_fraction)) if len(shuffled) > 1 else 0
         val_out.extend(shuffled[:n_val])
         train_out.extend(shuffled[n_val:])
@@ -333,11 +392,17 @@ def _make_entry(record: dict[str, Any]) -> dict[str, Any]:
     run of this script.
     """
     src = record["source_class"]
+
+    # ---- Build one-hot label dict ----
+    # Start all-zero; flip exactly one bit for pure-source tracks.
+    # Mixed content ([human=1, ai_class=1]) is handled separately — those
+    # records arrive from _load_mixed_records() with labels already set and
+    # never go through _make_entry().
     labels: dict[str, int] = {cls: 0 for cls in SOURCEID_CLASSES}
     if src == "natural":
-        labels["human"] = 1
+        labels["human"] = 1         # natural audio → creative agency is human
     elif src in labels:
-        labels[src] = 1
+        labels[src] = 1             # AI source → flip its own class bit
     # src not in SOURCEID_CLASSES (e.g. melodia passed by mistake) → all-zero
     # labels; callers should not pass such records.
 
@@ -376,6 +441,10 @@ def _compute_pos_weight(entries: list[dict[str, Any]]) -> dict[str, float]:
     manifests means the training loop never recomputes it and val metrics use
     the same weight (consistent evaluation).
     """
+    # ---- Count positives and negatives per class ----
+    # Each entry contributes independently to every class (multilabel, not
+    # multiclass), so a mixed [human=1, suno=1] entry increments pos for both
+    # human and suno and neg for the other six classes.
     pos: dict[str, int] = {c: 0 for c in SOURCEID_CLASSES}
     neg: dict[str, int] = {c: 0 for c in SOURCEID_CLASSES}
     for entry in entries:
@@ -385,6 +454,10 @@ def _compute_pos_weight(entries: list[dict[str, Any]]) -> dict[str, float]:
             else:
                 neg[cls] += 1
 
+    # ---- Compute per-class weight ----
+    # pos_weight[c] = neg[c] / pos[c]  →  BCE loss treats each positive as
+    # if it were neg/pos negatives, balancing the gradient contribution
+    # regardless of how skewed the natural:AI track ratio is.
     weights: dict[str, float] = {}
     for cls in SOURCEID_CLASSES:
         if pos[cls] == 0:
@@ -454,7 +527,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    rng = random.Random(args.seed)
+    rng = random.Random(args.seed)   # seeded once; all sub-calls draw from this instance
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # ---- Load records for all sources ----
@@ -466,12 +539,20 @@ def main() -> None:
     ai_records: dict[str, list[dict[str, Any]]] = {}
     for src in SOURCEID_AI_SOURCES:
         records = _load_source_records(src, args.dataset_root)
+        # Cap each AI source to DEFAULT_AI_CAP (2500) tracks, preserving the
+        # vocal_class × high_energy_bucket distribution.  Natural is uncapped
+        # (~9 k tracks) because the pos_weight mechanism handles the imbalance.
         capped = _cap_stratified(records, args.ai_cap, rng)
         ai_records[src] = capped
         cap_note = f" (capped from {len(records)})" if len(capped) < len(records) else ""
         print(f"  {src}: {len(capped)} usable tracks{cap_note}")
 
-    # ---- naturalguard_pretrain.json ----
+    # Mixed examples are not capped — build_mixed_examples.py already controls
+    # their volume, and they don't need stratification (all are 7-second voiced clips).
+    mixed_records = _load_mixed_records(args.dataset_root)
+    print(f"  mixed: {len(mixed_records)} examples")
+
+    # ---- Write naturalguard_pretrain.json ----
     # Natural-only. NT-Xent is self-supervised — no labels needed for the loss
     # function, but entries include labels for consistency with the SourceID
     # manifests (useful for debugging and future use).
@@ -484,8 +565,10 @@ def main() -> None:
         json.dump(ng_manifest, f, indent=2)
     print(f"\nnaturalguard_pretrain.json: {len(ng_entries)} entries")
 
-    # ---- sourceid_train.json and sourceid_val.json ----
-    # Stratified 90/10 split per source, then combined across all sources.
+    # ---- Compute stratified train/val split per source ----
+    # Each source is split independently so every source appears in both train
+    # and val at the specified fraction.  Results are then concatenated into
+    # the combined sourceid_train / sourceid_val manifests.
 
     print("\nTrain/val split (stratified by vocal_class × high_energy_bucket):")
     all_train: list[dict[str, Any]] = []
@@ -503,11 +586,22 @@ def main() -> None:
         all_val.extend(_make_entry(r) for r in val)
         _print_split_stats(src, len(trn), len(val), len(records))
 
-    # Pos weight from train set.
+    # Mixed examples are already in entry format (labels are pre-computed two-hot).
+    # Split the same 90/10 as pure sources. No _make_entry() call needed.
+    if mixed_records:
+        mix_trn, mix_val = _train_val_split(mixed_records, args.val_fraction, rng)
+        all_train.extend(mix_trn)
+        all_val.extend(mix_val)
+        _print_split_stats("mixed", len(mix_trn), len(mix_val), len(mixed_records))
+
+    # ---- Compute pos_weight and write sourceid manifests ----
+    # pos_weight is computed on the train set only; same values are stored in
+    # the val manifest so the training loop never has to recompute them.
+
     pos_weight = _compute_pos_weight(all_train)
 
     train_manifest: dict[str, Any] = {
-        "class_names": SOURCEID_CLASSES,
+        "class_names": SOURCEID_CLASSES,  # class order that MultilabelHead must match
         "pos_weight": pos_weight,
         "entries": all_train,
     }
@@ -525,6 +619,8 @@ def main() -> None:
     with open(val_path, "w") as f:
         json.dump(val_manifest, f, indent=2)
 
+    # ---- Print summary ----
+
     print(f"\nsourceid_train.json: {len(all_train):6d} entries")
     print(f"sourceid_val.json:   {len(all_val):6d} entries")
     total_sourceid = len(all_train) + len(all_val)
@@ -533,6 +629,8 @@ def main() -> None:
     print("\npos_weight (train):")
     max_w = max(pos_weight.values())
     for cls in SOURCEID_CLASSES:
+        # Bar width proportional to weight; max 40 chars.  AI classes will be
+        # ~3.5× wider than human because human positives outnumber AI positives.
         bar = "█" * int(40 * pos_weight[cls] / max(max_w, 1))
         print(f"  {cls:20s}  {pos_weight[cls]:6.3f}  {bar}")
 

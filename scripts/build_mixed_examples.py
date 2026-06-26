@@ -176,7 +176,11 @@ def _stable_seed(base: int, key: str) -> int:
     Using MD5 here gives the same seed for the same (base, key) regardless of
     environment, ensuring reproducibility when the script is re-run.
     """
+    # MD5 hex → int, then mask to 31 bits so the result fits in a signed 32-bit int.
+    # This keeps numpy's SeedSequence happy (it accepts int | None, not arbitrary bigints).
     h = int(hashlib.md5(key.encode()).hexdigest(), 16) & 0x7FFFFFFF
+    # XOR with the global base seed so two different bases produce different seeds
+    # for the same key string, preventing accidental alignment across runs.
     return (base ^ h) & 0x7FFFFFFF
 
 
@@ -244,31 +248,39 @@ def _sample_window(
     arr = None
     for attempt in range(MAX_WINDOW_RETRIES):
         if total_frames is not None and total_frames > WINDOW_SAMPLES:
+            # Choose a random start that leaves at least WINDOW_SAMPLES frames
+            # before the end, so we never read off the tail of the file.
             start = int(rng.integers(0, total_frames - WINDOW_SAMPLES))
         else:
-            start = 0
+            start = 0  # file is shorter than one window; pad below
 
         try:
             wav, _ = torchaudio.load(mp3_abs, frame_offset=start, num_frames=WINDOW_SAMPLES)
             arr = wav.numpy()  # [1, N]
         except Exception:
-            # Offset decoding failed — fall back to full load.
+            # Offset decoding failed — some MP3 encoders don't support seeking via
+            # frame_offset. Decode the whole file into RAM then slice manually.
             wav, _ = torchaudio.load(mp3_abs)
             n = wav.shape[-1]
             max_start = max(0, n - WINDOW_SAMPLES)
             start = int(rng.integers(0, max_start + 1))
             arr = wav.numpy()[:, start: start + WINDOW_SAMPLES]
 
-        # Zero-pad if the file is shorter than one window.
+        # Zero-pad short files (e.g. a speaker with < 7 s of processed audio)
+        # rather than raising an error. The tail is silent, but the vocal silence
+        # check below will catch windows that are *mostly* silent.
         if arr.shape[-1] < WINDOW_SAMPLES:
             arr = np.pad(arr, ((0, 0), (0, WINDOW_SAMPLES - arr.shape[-1])))
 
+        # Silence check: avoid windows where the speaker isn't actually talking.
+        # Peak amplitude < 0.01 on a file normalised to -16 LUFS indicates silence
+        # (0.01 ≈ -40 dBFS, well below any voiced speech or singing).
         if silence_check and float(np.abs(arr).max()) < VOCAL_SILENCE_THRESHOLD:
             if attempt < MAX_WINDOW_RETRIES - 1:
                 continue  # try another start position
         break
 
-    return arr.astype(np.float32)  # ensure float32 for pedalboard
+    return arr.astype(np.float32)  # pedalboard requires float32 input
 
 
 # ---------------------------------------------------------------------------
@@ -314,13 +326,16 @@ def _apply_vocal_chain(
     ]
 
     if preset != "none":
+        # Pedalboard's Reverb takes a linear wet_level in [0, 1], not dB.
+        # Convert: amplitude_ratio = 10^(dB / 20).  At -20 dB this is ≈ 0.10
+        # (very subtle tail); at -10 dB it is ≈ 0.32 (audible but not washy).
         wet_linear = float(10 ** (wet_db / 20.0))
         p = _REVERB_PRESETS[preset]
         plugins.append(Reverb(
             room_size=p["room_size"],
             damping=p["damping"],
             width=p["width"],
-            dry_level=1.0,
+            dry_level=1.0,   # keep dry signal at full level
             wet_level=wet_linear,
         ))
 
@@ -358,9 +373,14 @@ def _apply_glue_compression(
       Compressor(threshold, ratio=2, attack=10ms, release=100ms)
       Gain(target dB)                — makeup
     """
+    # 20*log10(max|x|) converts peak amplitude to dBFS (dB relative to full scale).
+    # ε = 1e-9 guards against log10(0) if the mix is numerically silent (shouldn't
+    # happen in practice, but avoids an uncaught ValueError in the worker process).
     peak_dbfs = 20.0 * math.log10(float(np.abs(mixed).max()) + 1e-9)
+    # target is how many dB below the peak we want the compressor threshold.
+    # A small target (2–4 dB) gives a gentle "glue" effect rather than hard limiting.
     target    = float(rng.uniform(2.0, 4.0))
-    threshold = peak_dbfs - target
+    threshold = peak_dbfs - target  # compressor engages just below the mix's peak
 
     board = Pedalboard([
         Compressor(threshold_db=threshold, ratio=2.0, attack_ms=10.0, release_ms=100.0),
@@ -409,6 +429,9 @@ def _worker(item: WorkItem) -> dict[str, Any]:
 
         # ── 5: Vocal gain ─────────────────────────────────────────────────
         vocal_gain_db = float(rng.uniform(-6.0, 6.0))
+        # Amplitude scale factor from dB: A = 10^(dB/20).
+        # Combined with VOCAL_PRE_SUM_DB (-6 dB), the effective vocal-to-instrumental
+        # balance ranges from -12 dB (gain=-6) to 0 dB (gain=+6).
         vocal_proc = vocal_proc * float(10.0 ** (vocal_gain_db / 20.0))
 
         # ── 6: Mix ────────────────────────────────────────────────────────
@@ -426,6 +449,7 @@ def _worker(item: WorkItem) -> dict[str, Any]:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, prefix="mixbld_") as tmp:
             tmp_wav = tmp.name
         try:
+            # soundfile expects shape [frames, channels]; mixed_comp is [1, N], so transpose.
             sf.write(tmp_wav, mixed_comp.T, SR, subtype="FLOAT")
             _ffmpeg_encode(tmp_wav, item.output_mp3_abs)
         finally:
@@ -608,11 +632,15 @@ def _plan_work(
         return []
 
     n_combos = len(combos)
-    # Base count per combo, then distribute remainder to first combos.
+    # Divide total_count as evenly as possible. divmod gives (floor, leftover).
+    # The leftover examples are assigned one-per-combo to the first `remainder`
+    # combos so no combo ever gets more than one extra example.
     base, remainder = divmod(total_count, n_combos)
     counts = {combo: base + (1 if i < remainder else 0) for i, combo in enumerate(combos)}
 
-    # Per-combo RNG for speaker + AI track assignment (deterministic).
+    # Each combo gets its own independent RNG seeded from (global_seed, combo_name).
+    # Keeping them separate means adding a new combo never shifts the sequence for
+    # existing combos, preserving reproducibility when the source list changes.
     combo_rng_map = {
         combo: np.random.default_rng(_stable_seed(seed, f"{split}_{combo[0]}_{combo[1]}"))
         for combo in combos
@@ -628,17 +656,17 @@ def _plan_work(
         for idx in range(n):
             song_id = f"{combo_id}_{idx:05d}"
 
-            # Always draw from the RNG before checking skip, so that
-            # resumed runs assign the same (speaker, AI track) to every
-            # index regardless of which indices were already generated.
-            # If the draw happened only for non-skipped indices, index k
-            # in a resumed run would get the assignment intended for
-            # index k-j (where j examples were skipped before it).
+            # Draw speaker and AI track BEFORE the skip check.
+            # The RNG state must advance for every index — including already-generated
+            # ones — so that index k always maps to the same (speaker, AI track) whether
+            # it was skipped on a prior run or not.  If we only drew on non-skipped
+            # indices, a resumed run would assign index k the assignment originally
+            # intended for index k−j (where j is the number of skipped indices before k).
             spk = spk_list[int(rng.integers(0, len(spk_list)))]
             ai  = ai_list[int(rng.integers(0, len(ai_list)))]
 
             if song_id in existing_song_ids:
-                continue  # already generated — skip
+                continue  # already generated on a previous run — skip generation, not the draw
 
             out_rel = f"processed/{split}/mixed/{combo_id}/{idx:05d}.mp3"
             out_abs = str(dataset_root / out_rel)
