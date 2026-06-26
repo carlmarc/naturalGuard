@@ -1,0 +1,367 @@
+{
+  "boomy": {
+    "total_files": 11157,
+    "total_duration_hours": 350.4948259225058,
+    "errors": 0,
+    "by_format": {
+      ".mp3": 11157
+    },
+    "by_codec": {
+      "mp3": 11157
+    },
+    "by_bitrate": {
+      "128kbps": 10996,
+      "257-320kbps": 9,
+      "129-192kbps": 152
+    },
+    "by_samplerate": {
+      "44100Hz": 11149,
+      "48000Hz": 8
+    },
+    "by_channels": {
+      "2": 11157
+    },
+    "by_encoder": {
+      "none": 11149,
+      "Hybrik 1.243.12": 1,
+      "Hybrik 1.247.21": 6,
+      "Hybrik 1.235.13": 1
+    },
+    "below_128kbps": 0,
+    "lame_encoded": 0,
+    "non_lame_mp3": 11157,
+    "combinations": {
+      ".mp3/128kbps/44100Hz": 10996,
+      ".mp3/257-320kbps/48000Hz": 8,
+      ".mp3/257-320kbps/44100Hz": 1,
+      ".mp3/129-192kbps/44100Hz": 152
+    }
+  },
+  "elevenlabsmusic": {
+    "total_files": 2212,
+    "total_duration_hours": 25.18707618972216,
+    "errors": 0,
+    "by_format": {
+      ".wav": 1297,
+      ".mp3": 915
+    },
+    "by_codec": {
+      "mp3": 2211,
+      "pcm_s16le": 1
+    },
+    "by_bitrate": {
+      "128kbps": 1296,
+      ">320kbps": 1,
+      "129-192kbps": 915
+    },
+    "by_samplerate": {
+      "44100Hz": 2212
+    },
+    "by_channels": {
+      "2": 2212
+    },
+    "by_encoder": {
+      "Lavf60.16.100": 1296,
+      "none": 1,
+      "Lavf59.27.100": 915
+    },
+    "below_128kbps": 0,
+    "lame_encoded": 0,
+    "non_lame_mp3": 915,
+    "combinations": {
+      ".wav/128kbps/44100Hz": 1296,
+      ".wav/>320kbps/44100Hz": 1,
+      ".mp3/129-192kbps/44100Hz": 915
+    }
+  },
+  "ldm2": {
+    "total_files": 14912,
+    "total_duration_hours": 48.9150400000067,
+    "errors": 0,
+    "by_format": {
+      ".wav": 13792,
+      ".mp3": 1120
+    },
+    "by_codec": {
+      "pcm_s16le": 13792,
+      "mp3": 1120
+    },
+    "by_bitrate": {
+      "193-256kbps": 13792,
+      "<96kbps": 1120
+    },
+    "by_samplerate": {
+      "16000Hz": 14912
+    },
+    "by_channels": {
+      "1": 14912
+    },
+    "by_encoder": {
+      "none": 14912
+    },
+    "below_128kbps": 1120,
+    "lame_encoded": 0,
+    "non_lame_mp3": 1120,
+    "combinations": {
+      ".wav/193-256kbps/16000Hz": 13792,
+      ".mp3/<96kbps/16000Hz": 1120
+    }
+  },
+  "melodia": {
+    "total_files": 98,
+    "total_duration_hours": 2.5177859908333327,
+    "errors": 0,
+    "by_format": {
+      ".mp3": 98
+    },
+    "by_codec": {
+      "pcm_s16le": 97,
+      "mp3": 1
+    },
+    "by_bitrate": {
+      ">320kbps": 97,
+      "128kbps": 1
+    },
+    "by_samplerate": {
+      "44100Hz": 98
+    },
+    "by_channels": {
+      "2": 98
+    },
+    "by_encoder": {
+      "Lavf58.76.100": 98
+    },
+    "below_128kbps": 0,
+    "lame_encoded": 0,
+    "non_lame_mp3": 98,
+    "combinations": {
+      ".mp3/>320kbps/44100Hz": 97,
+      ".mp3/128kbps/44100Hz": 1
+    }
+  },
+  "mubert": {
+    "total_files": 27772,
+    "total_duration_hours": 185.9708341836534,
+    "errors": 0,
+    "by_format": {
+      ".wav": 27772
+    },
+    "by_codec": {
+      "pcm_s16le": 27772
+    },
+    "by_bitrate": {
+      ">320kbps": 27772
+    },
+    "by_samplerate": {
+      "22050Hz": 23777,
+      "44100Hz": 3995
+    },
+    "by_channels": {
+      "1": 23777,
+      "2": 3995
+    },
+    "by_encoder": {
+      "none": 23777,
+      "Lavf58.20.100": 3995
+    },
+    "below_128kbps": 0,
+    "lame_encoded": 0,
+    "non_lame_mp3": 0,
+    "combinations": {
+      ".wav/>320kbps/22050Hz": 23777,
+      ".wav/>320kbps/44100Hz": 3995
+    }
+  },
+  "mureka": {
+    "total_files": 4222,
+    "total_duration_hours": 220.0275156172215,
+    "errors": 0,
+    "by_format": {
+      ".mp3": 4222
+    },
+    "by_codec": {
+      "mp3": 4222
+    },
+    "by_bitrate": {
+      "129-192kbps": 3577,
+      "128kbps": 194,
+      "257-320kbps": 451
+    },
+    "by_samplerate": {
+      "44100Hz": 4222
+    },
+    "by_channels": {
+      "2": 4222
+    },
+    "by_encoder": {
+      "Lavf58.76.100": 3950,
+      "Lavf61.1.100": 25,
+      "Lavf58.29.100": 247
+    },
+    "below_128kbps": 0,
+    "lame_encoded": 0,
+    "non_lame_mp3": 4222,
+    "combinations": {
+      ".mp3/129-192kbps/44100Hz": 3577,
+      ".mp3/128kbps/44100Hz": 194,
+      ".mp3/257-320kbps/44100Hz": 451
+    }
+  },
+  "musicgen": {
+    "total_files": 11124,
+    "total_duration_hours": 93.03226666667526,
+    "errors": 0,
+    "by_format": {
+      ".wav": 10004,
+      ".mp3": 1120
+    },
+    "by_codec": {
+      "pcm_s16le": 10004,
+      "mp3": 1120
+    },
+    "by_bitrate": {
+      ">320kbps": 10004,
+      "<96kbps": 1120
+    },
+    "by_samplerate": {
+      "32000Hz": 11124
+    },
+    "by_channels": {
+      "2": 4901,
+      "1": 6223
+    },
+    "by_encoder": {
+      "Lavf58.45.100": 10004,
+      "none": 1120
+    },
+    "below_128kbps": 1120,
+    "lame_encoded": 0,
+    "non_lame_mp3": 1120,
+    "combinations": {
+      ".wav/>320kbps/32000Hz": 10004,
+      ".mp3/<96kbps/32000Hz": 1120
+    }
+  },
+  "natural": {
+    "total_files": 18339,
+    "total_duration_hours": 1512.9266760555604,
+    "errors": 0,
+    "by_format": {
+      ".mp3": 18339
+    },
+    "by_codec": {
+      "mp3": 18339
+    },
+    "by_bitrate": {
+      "96-127kbps": 6758,
+      "<96kbps": 1849,
+      "129-192kbps": 9183,
+      "128kbps": 544,
+      "193-256kbps": 5
+    },
+    "by_samplerate": {
+      "48000Hz": 17807,
+      "44100Hz": 500,
+      "22050Hz": 32
+    },
+    "by_channels": {
+      "2": 18306,
+      "1": 33
+    },
+    "by_encoder": {
+      "Lavf59.27.100": 14751,
+      "Lavf58.76.100": 3588
+    },
+    "below_128kbps": 8607,
+    "lame_encoded": 0,
+    "non_lame_mp3": 18339,
+    "combinations": {
+      ".mp3/96-127kbps/48000Hz": 6481,
+      ".mp3/<96kbps/48000Hz": 1712,
+      ".mp3/129-192kbps/48000Hz": 9072,
+      ".mp3/96-127kbps/44100Hz": 277,
+      ".mp3/128kbps/48000Hz": 537,
+      ".mp3/129-192kbps/44100Hz": 111,
+      ".mp3/<96kbps/44100Hz": 105,
+      ".mp3/<96kbps/22050Hz": 32,
+      ".mp3/193-256kbps/48000Hz": 5,
+      ".mp3/128kbps/44100Hz": 7
+    }
+  },
+  "stable_audio": {
+    "total_files": 10000,
+    "total_duration_hours": 83.33333333334572,
+    "errors": 0,
+    "by_format": {
+      ".wav": 10000
+    },
+    "by_codec": {
+      "pcm_s16le": 10000
+    },
+    "by_bitrate": {
+      ">320kbps": 10000
+    },
+    "by_samplerate": {
+      "44100Hz": 10000
+    },
+    "by_channels": {
+      "2": 10000
+    },
+    "by_encoder": {
+      "none": 10000
+    },
+    "below_128kbps": 0,
+    "lame_encoded": 0,
+    "non_lame_mp3": 0,
+    "combinations": {
+      ".wav/>320kbps/44100Hz": 10000
+    }
+  },
+  "suno": {
+    "total_files": 28296,
+    "total_duration_hours": 1518.4712654736065,
+    "errors": 0,
+    "by_format": {
+      ".mp3": 28296
+    },
+    "by_codec": {
+      "mp3": 28216,
+      "pcm_s16le": 80
+    },
+    "by_bitrate": {
+      "129-192kbps": 24168,
+      "193-256kbps": 3976,
+      "96-127kbps": 4,
+      "128kbps": 67,
+      ">320kbps": 80,
+      "257-320kbps": 1
+    },
+    "by_samplerate": {
+      "48000Hz": 28282,
+      "44100Hz": 14
+    },
+    "by_channels": {
+      "2": 28296
+    },
+    "by_encoder": {
+      "Lavf58.45.100": 17369,
+      "Lavf58.76.100": 8699,
+      "Lavf60.16.100": 2081,
+      "none": 147
+    },
+    "below_128kbps": 4,
+    "lame_encoded": 0,
+    "non_lame_mp3": 28296,
+    "combinations": {
+      ".mp3/129-192kbps/48000Hz": 24162,
+      ".mp3/193-256kbps/48000Hz": 3969,
+      ".mp3/129-192kbps/44100Hz": 6,
+      ".mp3/193-256kbps/44100Hz": 7,
+      ".mp3/96-127kbps/44100Hz": 1,
+      ".mp3/128kbps/48000Hz": 67,
+      ".mp3/>320kbps/48000Hz": 80,
+      ".mp3/96-127kbps/48000Hz": 3,
+      ".mp3/257-320kbps/48000Hz": 1
+    }
+  }
+}
